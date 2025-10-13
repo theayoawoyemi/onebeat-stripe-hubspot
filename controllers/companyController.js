@@ -203,14 +203,15 @@ exports.stripe = async (req, res, next) => {
   let event;
 
   try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      req.headers["stripe-signature"],
-      STRIPE_WEBHOOK_SECRET
-    );
+    // event = stripe.webhooks.constructEvent(
+    //   req.body,
+    //   req.headers["stripe-signature"],
+    //   STRIPE_WEBHOOK_SECRET
+    // );
 
     // To be deleted
-    // event = req.body;
+    let parsedBody = req.body.toString("utf8");
+    event = JSON.parse(parsedBody);
 
     if (!event) throw new Error("Error getting event from stripe");
 
