@@ -2,17 +2,15 @@ const axios = require("axios");
 const hubspot = require("@hubspot/api-client");
 
 // Live
-const HUBSPOT_TOKEN = process.env.HUBSPOT_TOKEN;
+// const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+// const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+// const stripe = require("stripe")(STRIPE_SECRET_KEY);
 
 // Live
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
-
+const HUBSPOT_TOKEN = process.env.HUBSPOT_TOKEN;
 const hubspotClient = new hubspot.Client({
   accessToken: HUBSPOT_TOKEN,
 });
-
-const stripe = require("stripe")(STRIPE_SECRET_KEY);
 
 async function getCompanyByOnebeatId(onebeatId) {
   try {
@@ -99,7 +97,7 @@ async function getCustomObjectSchemas() {
   }
 }
 
-async function getStripeInvoiceByNumber(invoice_number, objectType) {
+async function getStripeInvoiceByInvoiceId(invoice_id, objectType) {
   try {
     const searchResponse = await hubspotClient.crm.objects.searchApi.doSearch(
       objectType,
@@ -108,14 +106,19 @@ async function getStripeInvoiceByNumber(invoice_number, objectType) {
           {
             filters: [
               {
-                propertyName: "invoice_number",
+                propertyName: "invoice_id",
                 operator: "EQ",
-                value: invoice_number,
+                value: invoice_id,
               },
             ],
           },
         ],
-        properties: ["hs_object_id", "onebeat_id", "invoice_number"],
+        properties: [
+          "hs_object_id",
+          "onebeat_id",
+          "invoice_number",
+          "invoice_id",
+        ],
         limit: 1,
       }
     );
@@ -124,7 +127,7 @@ async function getStripeInvoiceByNumber(invoice_number, objectType) {
       const stripeInvoice = searchResponse.results[0];
       return stripeInvoice;
     } else {
-      console.log("No Stripe Invoice found with Number:", invoice_number);
+      console.log("No Stripe Invoice found with ID:", invoice_id);
       return null;
     }
   } catch (error) {
@@ -135,6 +138,43 @@ async function getStripeInvoiceByNumber(invoice_number, objectType) {
     throw error;
   }
 }
+
+// async function getStripeInvoiceByNumber(invoice_number, objectType) {
+//   try {
+//     const searchResponse = await hubspotClient.crm.objects.searchApi.doSearch(
+//       objectType,
+//       {
+//         filterGroups: [
+//           {
+//             filters: [
+//               {
+//                 propertyName: "invoice_number",
+//                 operator: "EQ",
+//                 value: invoice_number,
+//               },
+//             ],
+//           },
+//         ],
+//         properties: ["hs_object_id", "onebeat_id", "invoice_number"],
+//         limit: 1,
+//       }
+//     );
+
+//     if (searchResponse.results.length > 0) {
+//       const stripeInvoice = searchResponse.results[0];
+//       return stripeInvoice;
+//     } else {
+//       console.log("No Stripe Invoice found with Number:", invoice_number);
+//       return null;
+//     }
+//   } catch (error) {
+//     console.error(
+//       "Error retrieving Stripe Invoice custom object:",
+//       error.message
+//     );
+//     throw error;
+//   }
+// }
 
 async function getStripeInvoicesByCompanyID(company_id, objectType) {
   try {
@@ -209,16 +249,32 @@ exports.stripe = async (req, res, next) => {
     //   STRIPE_WEBHOOK_SECRET
     // );
 
-    // To be deleted
     let parsedBody = req.body.toString("utf8");
     event = JSON.parse(parsedBody);
 
+    // event = req.body;
+
     if (!event) throw new Error("Error getting event from stripe");
 
+    const formatNumber = (num) => {
+      let formatted;
+
+      formatted = num / 100;
+
+      // formatted = formatted.toLocaleString("en-US", {
+      //   minimumFractionDigits: 2,
+      //   maximumFractionDigits: 2,
+      // });
+
+      formatted = formatted.toFixed(2);
+
+      return formatted;
+    };
+
     const payload = {
-      total: event.data.object.total,
-      amount_remaining: event.data.object.amount_remaining,
-      amount_paid: event.data.object.amount_paid,
+      total: formatNumber(event.data.object.total),
+      amount_remaining: formatNumber(event.data.object.amount_remaining),
+      amount_paid: formatNumber(event.data.object.amount_paid),
       due_date: event.data.object.due_date,
       period_start: event.data.object.period_start,
       period_end: event.data.object.period_end,
@@ -238,10 +294,20 @@ exports.stripe = async (req, res, next) => {
     if (!payloadValues.length)
       throw new Error("Error getting payload from event");
 
-    if (!payload.number)
-      throw new Error("Invoice number not found in the event data");
+    // console.log(payload.action);
 
-    payload.onebeat_id = event.data.object.metadata["Onebeat ID"];
+    if (!payload.number) payload.number = `DRAFT-${payload.id}`;
+    // throw new Error("Invoice number not found in the event data");
+
+    if (event.data.object?.subscription_details?.metadata) {
+      payload.onebeat_id =
+        event.data.object?.subscription_details?.metadata["Onebeat ID"] || null;
+    } else if (event.data.object?.lines?.data[0]?.metadata) {
+      payload.onebeat_id =
+        event.data.object?.lines?.data[0]?.metadata["Onebeat ID"] || null;
+    } else if (event.data.object?.metadata) {
+      payload.onebeat_id = event.data.object?.metadata["Onebeat ID"] || null;
+    }
 
     if (!payload.onebeat_id)
       throw new Error("Onebeat ID not found in the event metadata");
@@ -263,7 +329,9 @@ exports.stripe = async (req, res, next) => {
     //   "invoice.paid",
     // ];
 
-    if (payload.action === "invoice.sent") {
+    console.log(payload);
+
+    if (payload.action === "invoice.created") {
       try {
         // Test
         // const zapURL = "https://hooks.zapier.com/hooks/catch/11556657/u3kniew/";
@@ -294,7 +362,8 @@ exports.stripe = async (req, res, next) => {
     if (
       payload.action === "invoice.updated" ||
       payload.action === "invoice.paid" ||
-      payload.action === "invoice.voided"
+      payload.action === "invoice.voided" ||
+      payload.action === "invoice.sent"
     ) {
       try {
         // Run the function
@@ -303,8 +372,13 @@ exports.stripe = async (req, res, next) => {
           throw new Error("Custom object schemas not found");
         }
 
-        const invoice = await getStripeInvoiceByNumber(
-          payload.number,
+        // const invoice = await getStripeInvoiceByNumber(
+        //   payload.number,
+        //   schemas.fullyQualifiedName
+        // );
+
+        const invoice = await getStripeInvoiceByInvoiceId(
+          payload.id,
           schemas.fullyQualifiedName
         );
 
