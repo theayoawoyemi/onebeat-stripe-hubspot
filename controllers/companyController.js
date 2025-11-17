@@ -419,9 +419,16 @@ exports.stripe = async (req, res, next) => {
     });
   } catch (error) {
     console.error(error.message);
-    return res.status(400).json({
+    return res.status(200).json({
       status: "error",
       message: error.message,
     });
   }
+};
+
+exports.ping = async (req, res, next) => {
+  res.status(201).json({
+    status: "success",
+    message: "Syncing stripe",
+  });
 };

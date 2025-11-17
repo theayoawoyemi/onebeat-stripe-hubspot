@@ -8,6 +8,7 @@ process.on("uncaughtException", (err) => {
 // Imports
 const app = require("./application");
 const config = require("dotenv");
+const axios = require("axios");
 
 // Environmental variable setup
 config.config({ path: "./config.env" });
@@ -28,3 +29,17 @@ process.on("unhandledRejection", (err) => {
     }, 5000);
   });
 });
+
+// Keep the server awake on RENDER.com
+const url =
+  process.env.RENDER_EXTERNAL_URL ||
+  "https://onebeat-stripe-hubspot.onrender.com/companies/ping";
+// "http://127.0.0.1:3000/companies/ping";
+if (url) {
+  setInterval(() => {
+    axios
+      .get(url)
+      .then(() => console.log(`Pinged ${url} to stay awake`))
+      .catch((err) => console.error("Wake ping failed:", err.message));
+  }, 5 * 60 * 1000);
+}

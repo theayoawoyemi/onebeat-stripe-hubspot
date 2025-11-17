@@ -7,6 +7,6 @@ const useRaw = raw({ type: "application/json" });
 const useJSON = json({ type: "application/json" });
 
 router.route("/stripe").post(useRaw, companyController.stripe);
-// router.route("/stripe").post(useJSON, companyController.stripe);
+router.route("/ping").get(useJSON, companyController.ping);
 
 module.exports = router;
